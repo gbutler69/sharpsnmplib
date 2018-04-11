@@ -69,6 +69,18 @@ Project("{F184B08F-C81C-45F6-A57F-5ABD9991F28F}") = "snmptrapd", "Samples\VB.NET
 EndProject
 Project("{F184B08F-C81C-45F6-A57F-5ABD9991F28F}") = "snmpwalk", "Samples\VB.NET\snmpwalk\snmpwalk.vbproj", "{BE64B0A0-33D5-4CB0-A203-8F18266AD794}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{EC518598-8B0D-4769-AB09-1ECDB3D7A3E5}"
+	ProjectSection(SolutionItems) = preProject
+		appveyor.yml = appveyor.yml
+		build.debug.bat = build.debug.bat
+		build.release.bat = build.release.bat
+		CODE_OF_CONDUCT.md = CODE_OF_CONDUCT.md
+		LICENSE = LICENSE
+		prepare.bat = prepare.bat
+		prepare.sh = prepare.sh
+		readme.md = readme.md
+	EndProjectSection
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU

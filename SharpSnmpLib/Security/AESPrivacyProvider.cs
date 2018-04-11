@@ -43,6 +43,7 @@ namespace Lextm.SharpSnmpLib.Security
     {
         private readonly SaltGenerator _salt = new SaltGenerator();
         private readonly OctetString _phrase;
+        private readonly bool useRijndael;
         private const int KeyBytes = 16;
 
         /// <summary>
@@ -67,7 +68,9 @@ namespace Lextm.SharpSnmpLib.Security
         /// </summary>
         /// <param name="phrase">The phrase.</param>
         /// <param name="auth">The authentication provider.</param>
-        public AESPrivacyProvider(OctetString phrase, IAuthenticationProvider auth)
+        public AESPrivacyProvider(OctetString phrase, IAuthenticationProvider auth) : this(phrase, auth, useRijndael: true) { }
+
+        public AESPrivacyProvider(OctetString phrase, IAuthenticationProvider auth, bool useRijndael)
         {
             if (auth == null)
             {
@@ -87,6 +90,7 @@ namespace Lextm.SharpSnmpLib.Security
 
             _phrase = phrase;
             AuthenticationProvider = auth;
+            this.useRijndael = useRijndael;
         }
 
         /// <summary>
@@ -113,6 +117,15 @@ namespace Lextm.SharpSnmpLib.Security
         /// <returns>Encrypted byte array</returns>
         /// <exception cref="ArgumentOutOfRangeException">Thrown when encryption key is null or length of the encryption key is too short.</exception>
         internal static byte[] Encrypt(byte[] unencryptedData, byte[] key, int engineBoots, int engineTime, byte[] privacyParameters)
+        {
+            return Encrypt(useRijndael: true,
+                            unencryptedData: unencryptedData,
+                            key: key,
+                            engineBoots: engineBoots,
+                            engineTime: engineTime,
+                            privacyParameters: privacyParameters);
+        }
+        internal static byte[] Encrypt(bool useRijndael, byte[] unencryptedData, byte[] key, int engineBoots, int engineTime, byte[] privacyParameters)
         {
 #if NETSTANDARD1_3
             throw new PlatformNotSupportedException();
@@ -152,27 +165,26 @@ namespace Lextm.SharpSnmpLib.Security
             // Copy salt value to the iv array
             Buffer.BlockCopy(privacyParameters, 0, iv, 8, PrivacyParametersLength);
 
-            using (var rm = new RijndaelManaged())
+            using (var rm = useRijndael ? (SymmetricAlgorithm)new RijndaelManaged() : (SymmetricAlgorithm)new AesCryptoServiceProvider())
             {
-                rm.KeySize = KeyBytes * 8;
-                rm.FeedbackSize = 128;
-                rm.BlockSize = 128;
 
-                // we have to use Zeros padding otherwise we get encrypt buffer size exception
                 rm.Padding = PaddingMode.Zeros;
                 rm.Mode = CipherMode.CFB;
-
-                // make sure we have the right key length
+                rm.KeySize = KeyBytes * 8;
                 var pkey = new byte[MinimumKeyLength];
                 Buffer.BlockCopy(key, 0, pkey, 0, MinimumKeyLength);
                 rm.Key = pkey;
                 rm.IV = iv;
-                using (var cryptor = rm.CreateEncryptor())
+
+                                rm.BlockSize = 128;
+                    rm.FeedbackSize = 128;
+
+                using (var cryptor = rm.CreateEncryptor( rm.Key, rm.IV ))
                 {
                     var encryptedData = cryptor.TransformFinalBlock(unencryptedData, 0, unencryptedData.Length);
 
                     // check if encrypted data is the same length as source data
-                    if (encryptedData.Length != unencryptedData.Length)
+                    if (encryptedData.Length != unencryptedData.Length )
                     {
                         // cut out the padding
                         var tmp = new byte[unencryptedData.Length];
@@ -199,6 +211,16 @@ namespace Lextm.SharpSnmpLib.Security
         /// <exception cref="ArgumentOutOfRangeException">Thrown when encryption key length is less then 32 byte or if privacy parameters
         /// argument is null or length other then 8 bytes</exception>
         internal static byte[] Decrypt(byte[] encryptedData, byte[] key, int engineBoots, int engineTime, byte[] privacyParameters)
+        {
+            return Decrypt(useRijndael: true,
+                            encryptedData: encryptedData,
+                            key: key,
+                            engineBoots: engineBoots,
+                            engineTime: engineTime,
+                            privacyParameters: privacyParameters);
+        }
+
+        internal static byte[] Decrypt(bool useRijndael, byte[] encryptedData, byte[] key, int engineBoots, int engineTime, byte[] privacyParameters)
         {
 #if NETSTANDARD1_3
             throw new PlatformNotSupportedException();
@@ -236,13 +258,12 @@ namespace Lextm.SharpSnmpLib.Security
             Buffer.BlockCopy(privacyParameters, 0, iv, 8, PrivacyParametersLength);
 
             // now do CFB decryption of the encrypted data
-            using (var rm = new RijndaelManaged())
+            using (var rm = useRijndael ? (SymmetricAlgorithm)new RijndaelManaged() : (SymmetricAlgorithm)new AesCryptoServiceProvider())
             {
-                rm.KeySize = KeyBytes * 8;
-                rm.FeedbackSize = 128;
-                rm.BlockSize = 128;
+
                 rm.Padding = PaddingMode.Zeros;
                 rm.Mode = CipherMode.CFB;
+                rm.KeySize = KeyBytes * 8;
                 if (key.Length > KeyBytes)
                 {
                     var normKey = new byte[KeyBytes];
@@ -253,9 +274,12 @@ namespace Lextm.SharpSnmpLib.Security
                 {
                     rm.Key = key;
                 }
-
                 rm.IV = iv;
-                using (var cryptor = rm.CreateDecryptor())
+
+                    rm.BlockSize = 128;
+                    rm.FeedbackSize = 128;
+
+                using (var cryptor = rm.CreateDecryptor( rm.Key, rm.IV ))
                 {
                     // We need to make sure that cryptedData is a collection of 128 byte blocks
                     byte[] decryptedData;
@@ -311,7 +335,7 @@ namespace Lextm.SharpSnmpLib.Security
             get { return 16; }
         }
 
-#region IPrivacyProvider Members
+        #region IPrivacyProvider Members
 
         /// <summary>
         /// Decrypts the specified data.
@@ -342,7 +366,7 @@ namespace Lextm.SharpSnmpLib.Security
             var pkey = AuthenticationProvider.PasswordToKey(_phrase.GetRaw(), parameters.EngineId.GetRaw());
 
             // decode encrypted packet
-            var decrypted = Decrypt(bytes, pkey, parameters.EngineBoots.ToInt32(), parameters.EngineTime.ToInt32(), parameters.PrivacyParameters.GetRaw());
+            var decrypted = Decrypt(useRijndael, bytes, pkey, parameters.EngineBoots.ToInt32(), parameters.EngineTime.ToInt32(), parameters.PrivacyParameters.GetRaw());
             return DataFactory.CreateSnmpData(decrypted);
         }
 
@@ -384,7 +408,7 @@ namespace Lextm.SharpSnmpLib.Security
                 bytes = stream.ToArray();
             }
 
-            var encrypted = Encrypt(bytes, pkey, parameters.EngineBoots.ToInt32(), parameters.EngineTime.ToInt32(), parameters.PrivacyParameters.GetRaw());
+            var encrypted = Encrypt(useRijndael, bytes, pkey, parameters.EngineBoots.ToInt32(), parameters.EngineTime.ToInt32(), parameters.PrivacyParameters.GetRaw());
             return new OctetString(encrypted);
         }
 
@@ -397,7 +421,7 @@ namespace Lextm.SharpSnmpLib.Security
             get { return new OctetString(_salt.GetSaltBytes()); }
         }
 
-#endregion
+        #endregion
 
         /// <summary>
         /// Returns a string that represents this object.
